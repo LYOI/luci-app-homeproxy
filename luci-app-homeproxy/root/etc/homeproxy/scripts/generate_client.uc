@@ -1167,7 +1167,25 @@ if (!isEmpty(main_node)) {
 		detour: 'main-out',
 		...parse_dnsserver(dns_server, 'tcp')
 	});
+	/* FakeIP：国外域名返回假 IP（198.18.0.0/15），客户端连接假 IP 时
+	   sing-box 反查域名并按域名规则路由 —— 这样域名规则不再依赖 sniff，
+	   QUIC / ECH / 分片都不会漏。国内域名仍走 china-dns 返回真实 IP。 */
+	push(config.dns.servers, {
+		tag: 'fakeip',
+		type: 'fakeip',
+		inet4_range: '198.18.0.0/15',
+		inet6_range: (ipv6_support === '1') ? 'fc00::/18' : null
+	});
 	config.dns.final = 'main-dns';
+
+	/* 拒绝 AAAA 查询：国外站点普遍有 IPv6，但节点通常只有 IPv4 出口。
+	   客户端若拿到 IPv6 会直连出去（被墙），表现为 000 超时。
+	   这里统一不返回 AAAA，强制客户端走 IPv4 → 走代理。 */
+	if (ipv6_support !== '1')
+		push(config.dns.rules, {
+			query_type: [ 'AAAA' ],
+			action: 'reject'
+		});
 
 	if (length(direct_domain_list))
 		push(config.dns.rules, {
@@ -1206,24 +1224,9 @@ if (!isEmpty(main_node)) {
 			rule_set: 'geosite-cn',
 			action: 'route',
 			server: 'china-dns',
-			strategy: 'prefer_ipv6'
 		});
-		push(config.dns.rules, {
-			type: 'logical',
-			mode: 'and',
-			rules: [
-				{
-					rule_set: 'geosite-noncn',
-					invert: true
-				},
-				{
-					rule_set: 'geoip-cn'
-				}
-			],
-			action: 'route',
-			server: 'china-dns',
-			strategy: 'prefer_ipv6'
-		});
+		/* sing-box 1.14 起禁止在 DNS 规则里使用地址类条件（geoip / ip_cidr），
+		   否则内核启动即 FATAL。DNS 阶段本来也拿不到目标 IP，此处只保留域名判定。 */
 	}
 } else if (!isEmpty(default_outbound)) {
 	/* DNS servers */
@@ -1666,6 +1669,59 @@ config.route = {
 	default_interface: default_interface
 };
 
+/* 简单分流：域名/关键词 → 指定出站（地区组 / main-out / direct-out）。
+   位置紧接 sniff，域名此时已可匹配，优先级高于内置分流。 */
+{
+	const sr_groups = {};
+
+	uci.foreach(uciconfig, 'simple_rule', (cfg) => {
+		if (!isSectionEnabled(cfg.enabled))
+			return;
+
+		const sr_val = trim(cfg.value ?? '');
+		const sr_ob = trim(cfg.outbound ?? '');
+
+		if (!sr_val || !sr_ob)
+			return;
+
+		const sr_key = sr_ob + '||' + (cfg.match ?? 'suffix');
+
+		if (!sr_groups[sr_key])
+			sr_groups[sr_key] = [];
+
+		push(sr_groups[sr_key], sr_val);
+	});
+
+	let sr_idx = 0;
+
+	for (let k in sr_groups) {
+		const sr_parts = split(k, '||');
+		const sr_ob = sr_parts[0];
+		const sr_mt = sr_parts[1];
+		const sr_tag = 'simple-' + (++sr_idx);
+		const sr_rule = {};
+
+		if (sr_mt === 'keyword')
+			sr_rule.domain_keyword = sr_groups[k];
+		else if (sr_mt === 'domain')
+			sr_rule.domain = sr_groups[k];
+		else
+			sr_rule.domain_suffix = sr_groups[k];
+
+		push(config.route.rule_set, {
+			type: 'inline',
+			tag: sr_tag,
+			rules: [ sr_rule ]
+		});
+
+		push(config.route.rules, {
+			rule_set: sr_tag,
+			action: 'route',
+			outbound: sr_ob
+		});
+	}
+}
+
 /* Routing rules */
 if (!isEmpty(main_node)) {
 	/* Avoid DNS loop */
@@ -2082,8 +2138,41 @@ if (uci.get(uciconfig, ucimain, 'region_routes')) {
 		});
 	}
 
-	if (length(rr_rules))
-		config.route.rules = [ ...rr_rules, ...(config.route.rules ?? []) ];
+	/* 关键：域名规则必须排在 sniff 之后。
+	   redirect 模式进来的是纯 IP，域名靠 sniff 从 TLS SNI 提取，
+	   排在 sniff 之前则 domain_suffix 永远匹配不到。 */
+	if (length(rr_rules)) {
+		const rr_merged = [];
+		let rr_done = false;
+
+		for (let k = 0; k < length(config.route.rules ?? []); k++) {
+			const rr_one = config.route.rules[k];
+			push(rr_merged, rr_one);
+
+			if (!rr_done && (type(rr_one) === 'object' && rr_one['action'] === 'sniff')) {
+				for (let j = 0; j < length(rr_rules); j++)
+					push(rr_merged, rr_rules[j]);
+				rr_done = true;
+			}
+		}
+
+		if (!rr_done) {
+			for (let j = 0; j < length(rr_rules); j++)
+				push(rr_merged, rr_rules[j]);
+		}
+
+		config.route.rules = rr_merged;
+	}
+}
+
+/* FakeIP 兜底规则：放在所有国内/直连规则之后，
+   未命中的（即国外）域名才返回假 IP。 */
+if (!isEmpty(main_node) && length(filter(config.dns.servers, (d) => d?.type === 'fakeip'))) {
+	push(config.dns.rules, {
+		query_type: [ 'A', 'AAAA' ],
+		action: 'route',
+		server: 'fakeip'
+	});
 }
 
 ensure_outbound_refs(config);

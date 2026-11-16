@@ -3678,28 +3678,58 @@ return view.extend({
 		ss = o.subsection;
 
 		/* Interface control start */
-		ss.tab('region_outbound', _('Region Outbound'));
+		ss.tab('simple_rule', _('Simple Routing'));
 
-		/* 出站地区控制：按节点标签里的地区关键词自动建 urltest 组，
-		   每个组内部自动挑该地区延迟最低的节点。 */
-		so = ss.taboption('region_outbound', form.Flag, 'region_groups_enable',
-			_('Auto-generate region groups'),
-			_('Group nodes by region (Hong Kong / Japan / US ...) and build one urltest group per region. ' +
-			  'Routing Rules can then point a domain at <code>region-HK</code>, <code>region-JP</code>, <code>region-US</code> and the kernel will always pick the fastest node inside that region.'));
-		so.default = so.enabled;
+		/* 简单分流：域名/关键词 → 指定出站。未匹配的走内置分流。 */
+		o = ss.taboption('simple_rule', form.SectionValue, '_simple_rule', form.GridSection, 'simple_rule');
+		let sso = o.subsection;
+
+		so = sso.option(form.ListValue, 'match', _('Match'));
+		so.value('suffix', _('Domain suffix'));
+		so.value('keyword', _('Domain keyword'));
+		so.value('domain', _('Exact domain'));
+		so.default = 'suffix';
 		so.rmempty = false;
 
-		so = ss.taboption('region_outbound', form.TextValue, 'region_routes',
-			_('Domain → region'),
-			_('One rule per line: <code>domain = region</code>. Example:<br/>' +
-			  '<code>youtube.com = US</code><br/>' +
-			  '<code>google.com = JP</code><br/>' +
-			  'Region codes: <code>HK JP US SG TW KR UK DE FR NL CA AU RU</code>; ' +
-			  'Chinese names (香港/日本/美国 ...) are also accepted. ' +
-			  'Matching is by domain suffix, so subdomains are covered.'));
-		so.rows = 8;
-		so.monospace = true;
-		so.placeholder = 'youtube.com = US\ngoogle.com = JP';
+		so = sso.option(form.TextValue, 'value', _('Domain / keyword'));
+		so.rmempty = false;
+
+		so = sso.option(form.ListValue, 'outbound', _('Outbound'));
+		/* 出站选项按当前订阅里的节点动态生成：只有真的存在该地区节点，
+		   才会出现对应的 region-XX，避免选到空组（会退化成直连）。 */
+		so.load = function(section_id) {
+			delete this.keylist;
+			delete this.vallist;
+
+			this.value('main-out', _('Default proxy (auto)'));
+			this.value('direct-out', _('Direct'));
+			this.value('block-out', _('Block'));
+
+			var region_map = {
+				'香港': 'HK', '台湾': 'TW', '日本': 'JP', '韩国': 'KR', '新加坡': 'SG',
+				'美国': 'US', '英国': 'UK', '德国': 'DE', '法国': 'FR', '荷兰': 'NL',
+				'加拿大': 'CA', '澳大利亚': 'AU', '俄罗斯': 'RU', '印度': 'IN', '土耳其': 'TR'
+			};
+			var found = {};
+			var nodes = uci.sections('homeproxy', 'node') || [];
+
+			for (var i = 0; i < nodes.length; i++) {
+				var label = nodes[i].label || '';
+
+				for (var cn in region_map) {
+					if (label.indexOf(cn) >= 0) {
+						found[region_map[cn]] = true;
+						break;
+					}
+				}
+			}
+
+			for (var code in found)
+				this.value('region-' + code, _('Region') + ': ' + code);
+
+			return this.super('load', section_id);
+		};
+		so.rmempty = false;
 
 		ss.tab('interface', _('Interface Control'));
 
