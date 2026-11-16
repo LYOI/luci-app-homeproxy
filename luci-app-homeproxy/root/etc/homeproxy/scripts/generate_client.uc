@@ -2007,9 +2007,14 @@ system('mkdir -p ' + RUN_DIR);
 system('mkdir -p ' + RULESET_DIR);
 /* 出站地区控制：按节点标签里的地区关键词，自动为该地区生成一个 urltest 组。
    路由规则可直接把域名指向 region-香港 / region-日本 这类出站。 */
+/* 地区中文名 → ISO 3166-1 二位代码（组名固定用英文代码，便于跨语言书写） */
+const HP_REGION_MAP = {
+	'香港': 'HK', '台湾': 'TW', '日本': 'JP', '韩国': 'KR', '新加坡': 'SG',
+	'美国': 'US', '英国': 'UK', '德国': 'DE', '法国': 'FR', '荷兰': 'NL',
+	'加拿大': 'CA', '澳大利亚': 'AU', '俄罗斯': 'RU', '印度': 'IN', '土耳其': 'TR'
+};
+
 if (uci.get(uciconfig, ucimain, 'region_groups_enable') !== '0') {
-	const HP_REGIONS = [ '香港', '台湾', '日本', '韩国', '新加坡', '美国', '英国',
-	                     '德国', '法国', '荷兰', '加拿大', '澳大利亚', '俄罗斯' ];
 	const region_groups = {};
 
 	uci.foreach(uciconfig, ucinode, (cfg) => {
@@ -2022,21 +2027,22 @@ if (uci.get(uciconfig, ucimain, 'region_groups_enable') !== '0') {
 		if (!length(filter(config.outbounds, (ob) => ob?.tag === tag)))
 			return;
 
-		for (let i = 0; i < length(HP_REGIONS); i++) {
-			if (index(label, HP_REGIONS[i]) >= 0) {
-				if (!region_groups[HP_REGIONS[i]])
-					region_groups[HP_REGIONS[i]] = [];
-				push(region_groups[HP_REGIONS[i]], tag);
+		for (let cn in HP_REGION_MAP) {
+			if (index(label, cn) >= 0) {
+				const code = HP_REGION_MAP[cn];
+				if (!region_groups[code])
+					region_groups[code] = [];
+				push(region_groups[code], tag);
 				break;
 			}
 		}
 	});
 
-	for (let region in region_groups) {
+	for (let code in region_groups) {
 		push(config.outbounds, {
 			type: 'urltest',
-			tag: 'region-' + region,
-			outbounds: region_groups[region],
+			tag: 'region-' + code,
+			outbounds: region_groups[code],
 			url: 'https://www.google.com/generate_204',
 			interval: '300s',
 			tolerance: 50
@@ -2060,7 +2066,9 @@ if (uci.get(uciconfig, ucimain, 'region_routes')) {
 			continue;
 
 		const rr_domain = trim(substr(line, 0, eq));
-		const rr_region = trim(substr(line, eq + 1));
+		const rr_region_raw = trim(substr(line, eq + 1));
+		/* 允许写中文地区名或英文代码，统一归一成大写代码 */
+		const rr_region = HP_REGION_MAP[rr_region_raw] || uc(rr_region_raw);
 
 		if (!rr_domain || !rr_region)
 			continue;

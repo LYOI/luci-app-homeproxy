@@ -4471,5 +4471,5 @@ msgstr "按节点标签中的地区（香港 / 日本 / 美国 等）分组，�
 msgid "Domain → region"
 msgstr "域名 → 地区"
 
-msgid "One rule per line: <code>domain = region</code>. Example:<br/><code>youtube.com = 美国</code><br/><code>google.com = 日本</code><br/>Region must match a generated group (香港 / 日本 / 美国 ...). Matching is by domain suffix, so subdomains are covered."
-msgstr "每行一条规则：<code>域名 = 地区</code>。示例：<br/><code>youtube.com = 美国</code><br/><code>google.com = 日本</code><br/>地区必须是已生成的组（香港 / 日本 / 美国 等）。按域名后缀匹配，自动覆盖所有子域。"
+msgid "One rule per line: <code>domain = region</code>. Example:<br/><code>youtube.com = US</code><br/><code>google.com = JP</code><br/>Region codes: <code>HK JP US SG TW KR UK DE FR NL CA AU RU</code>; Chinese names (香港/日本/美国 ...) are also accepted. Matching is by domain suffix, so subdomains are covered."
+msgstr "每行一条规则：<code>域名 = 地区</code>。示例：<br/><code>youtube.com = US</code><br/><code>google.com = JP</code><br/>地区代码：<code>HK JP US SG TW KR UK DE FR NL CA AU RU</code>；也支持中文名（香港/日本/美国 等）。按域名后缀匹配，自动覆盖所有子域。"

@@ -3692,13 +3692,14 @@ return view.extend({
 		so = ss.taboption('region_outbound', form.TextValue, 'region_routes',
 			_('Domain → region'),
 			_('One rule per line: <code>domain = region</code>. Example:<br/>' +
-			  '<code>youtube.com = 美国</code><br/>' +
-			  '<code>google.com = 日本</code><br/>' +
-			  'Region must match a generated group (香港 / 日本 / 美国 ...). ' +
+			  '<code>youtube.com = US</code><br/>' +
+			  '<code>google.com = JP</code><br/>' +
+			  'Region codes: <code>HK JP US SG TW KR UK DE FR NL CA AU RU</code>; ' +
+			  'Chinese names (香港/日本/美国 ...) are also accepted. ' +
 			  'Matching is by domain suffix, so subdomains are covered.'));
 		so.rows = 8;
 		so.monospace = true;
-		so.placeholder = 'youtube.com = 美国\ngoogle.com = 日本';
+		so.placeholder = 'youtube.com = US\ngoogle.com = JP';
 
 		ss.tab('interface', _('Interface Control'));
 
