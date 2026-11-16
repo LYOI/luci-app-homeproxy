@@ -812,7 +812,7 @@ setup_auto_update_cron() {
 	local routing_mode_now
 	config_get routing_mode_now "config" "routing_mode" "bypass_mainland_china"
 	if [ "$routing_mode_now" != "custom" ]; then
-		log "规则集定时更新未登记：routing_mode='${routing_mode_now:-空}'（用户规则集只在 custom 模式下被内核引用）。旧任务已清理。"
+		log "规则集定时更新：routing_mode='${routing_mode_now:-空}' 使用内置规则集，无需定时下载，已跳过（旧任务已清理）。"
 	fi
 	config_foreach add_ruleset_cron "ruleset"
 	[ "$cron_reload" = "1" ] && /etc/init.d/cron restart
