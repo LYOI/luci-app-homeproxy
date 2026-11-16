@@ -1183,6 +1183,19 @@ return view.extend({
 		}
 
 		o = s.taboption('routing', form.ListValue, 'proxy_mode', _('Proxy mode'));
+		/* eBPF 四种组合排在最前，默认第 1 种。由 sing-box 内核 eBPF inbound 直接
+		   接管流量，无需 nftables redirect/tproxy 劫持。四种都同时启用 local 与
+		   shared，故既能给 LAN 设备当透明代理网关，也让路由器本机走代理。
+		   需要内核支持 eBPF（BPF_JIT/cgroup v2/BTF）且所用 sing-box 内核带
+		   with_ebpf；不满足时请改回 Redirect 系列。 */
+		o.value('ebpf_cgroup_shared_socket_assign',
+			_('eBPF local(cgroup) + shared(socket_assign)'));
+		o.value('ebpf_cgroup_shared_packet_rewrite',
+			_('eBPF local(cgroup) + shared(packet_rewrite)'));
+		o.value('ebpf_socket_assign_shared_socket_assign',
+			_('eBPF local(socket_assign) + shared(socket_assign)'));
+		o.value('ebpf_socket_assign_shared_packet_rewrite',
+			_('eBPF local(socket_assign) + shared(packet_rewrite)'));
 		o.value('redirect', _('Redirect TCP'));
 		if (features.hp_has_tproxy)
 			o.value('redirect_tproxy', _('Redirect TCP + TProxy UDP'));
@@ -1192,8 +1205,28 @@ return view.extend({
 		} else {
 			o.description = _('To enable Tun support, you need to install <code>ip-full</code> and <code>kmod-tun</code>');
 		}
-		o.default = 'redirect_tproxy';
+		/* 默认值必须按内核能力决定：只有内核带 `with_ebpf`（`sing-box version`
+		   的 `Tags:` 行里出现它）时才默认 eBPF。旧内核（如 1.14.3-reF1nd_0.3.13）
+		   缺这个 build tag，选中 eBPF 后内核会以
+		   `FATAL initialize inbound[N]: eBPF inbound is not included in this build`
+		   拒绝启动 —— 整个服务起不来、全屋断网（0.4.0 开发期实测踩过）。
+		   内核支持时 eBPF 仍是默认项，符合「eBPF 优先」的产品意图。 */
+		if (features.with_ebpf) {
+			o.default = 'ebpf_cgroup_shared_socket_assign';
+		} else {
+			o.default = 'redirect_tproxy';
+			o.description = _('eBPF modes need a sing-box core built with <code>with_ebpf</code>. The current core lacks it, so selecting an eBPF mode makes the service fail to start.');
+		}
 		o.rmempty = false;
+
+		/* eBPF 的 local/shared 数据面已由上面所选模式决定，不再单独提供开关。
+		   这里只保留一个跨模式通用的“跳过私有地址”开关。 */
+		o = s.taboption('routing', form.Flag, 'ebpf_bypass_private',
+			_('eBPF: bypass private addresses'),
+			_('Skip LAN/private destination addresses in eBPF hijacking.'));
+		o.default = o.enabled;
+		o.rmempty = false;
+		o.depends({'proxy_mode': /^(ebpf).+/});
 
 		o = s.taboption('routing', form.Flag, 'ipv6_support', _('IPv6 support'));
 		o.default = o.enabled;

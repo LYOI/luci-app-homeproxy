@@ -221,7 +221,8 @@ const mixed_port = uci.get(uciconfig, uciinfra, 'mixed_port') || '5330';
 
 let self_mark, redirect_port, tproxy_port, tun_name,
     tun_addr4, tun_addr6, tun_mtu, tcpip_stack,
-    udp_timeout;
+    udp_timeout,
+    ebpf_cgroup_path, ebpf_bypass_private, ebpf_interface;
 
 if (routing_mode === 'custom')
 	udp_timeout = uci.get(uciconfig, uciroutingsetting, 'udp_timeout');
@@ -243,6 +244,44 @@ if (match(proxy_mode, /tun/)) {
 	tcpip_stack = 'system';
 	if (routing_mode === 'custom')
 		tcpip_stack = uci.get(uciconfig, uciroutingsetting, 'tcpip_stack') || 'system';
+}
+/* eBPF 四种代理模式（UI 下拉里的 4 项），值即「local 数据面 + shared 数据面」的组合。
+   用显式映射表而不是字符串切分：`socket_assign_socket_assign` 这类用 '_' 切分
+   会产生歧义。四种都同时启用 local 与 shared，因此既给 LAN 设备当透明代理网关，
+   也让路由器本机走代理。
+   枚举合法性（1.14.4 option/ebpf.go:32,52）：
+     local ∈ {cgroup, socket_assign}；shared ∈ {socket_assign, packet_rewrite}。 */
+const ebpf_mode_map = {
+	'ebpf_cgroup_shared_socket_assign':        { local: 'cgroup',        shared: 'socket_assign' },
+	'ebpf_cgroup_shared_packet_rewrite':       { local: 'cgroup',        shared: 'packet_rewrite' },
+	'ebpf_socket_assign_shared_socket_assign': { local: 'socket_assign', shared: 'socket_assign' },
+	'ebpf_socket_assign_shared_packet_rewrite':{ local: 'socket_assign', shared: 'packet_rewrite' }
+};
+let ebpf_spec = ebpf_mode_map[proxy_mode];
+/* 兼容：早期版本的单一 'ebpf' 取值，等价于默认的第 1 种（cgroup + socket_assign）。 */
+if (proxy_mode === 'ebpf')
+	ebpf_spec = ebpf_mode_map['ebpf_cgroup_shared_socket_assign'];
+
+if (ebpf_spec) {
+	/* eBPF 透明代理：由 sing-box 的内核 eBPF inbound 直接接管流量，不再使用
+	   nftables 的 redirect/tproxy 劫持链（firewall_post.ut 里 redirect/tproxy/tun
+	   三类分支都不会命中，故不会生成劫持规则）。
+	   - local（本机进程）：cgroup 数据面挂 cgroup 钩子；socket_assign 数据面走 tcx。
+	   - shared（LAN 转发）：socket_assign 或 packet_rewrite，均通过 tcx 附着网卡。
+	   data_plane 完全由所选模式决定，不再有单独的开关。 */
+	ebpf_cgroup_path = uci.get(uciconfig, ucimain, 'ebpf_cgroup_path');
+	ebpf_bypass_private = uci.get(uciconfig, ucimain, 'ebpf_bypass_private');
+	/* shared 数据面必须指定接管哪个网卡（sing-box: "shared.interface
+	   must not be empty"）。取值优先级：UI 显式 ebpf_interface → control.listen_interfaces
+	   第一项 → network.lan.device → eth0。 */
+	ebpf_interface = uci.get(uciconfig, ucimain, 'ebpf_interface');
+	if (isEmpty(ebpf_interface)) {
+		let li = uci.get(uciconfig, 'control', 'listen_interfaces');
+		if (type(li) === 'array' && length(li) > 0)
+			ebpf_interface = li[0];
+	}
+	if (isEmpty(ebpf_interface))
+		ebpf_interface = uci.get('network', 'lan', 'device') || uci.get('network', 'lan', 'ifname') || 'eth0';
 }
 
 /* Only the four levels the UI offers are accepted by sing-box. A hand-edited
@@ -829,12 +868,126 @@ function get_subscription_info(group_hash) {
 	}
 }
 
-/* Build the `proxy_providers` list for the (patched) reF1nd kernel's native
-   Clash API `/providers/proxies` endpoint. The patched kernel synthesises the
-   provider objects from this config and resolves each member to a real
-   outbound by its tag, so `proxies` is an array of outbound tags (strings),
-   not proxy objects. Keys follow sing-box's snake_case Clash API options:
-   `vehicle_type`, `updated_at`, `update_id`, `subscription_info`. */
+/* 内核 remote provider 的「种子」文件路径。update_subscriptions.uc 在每次
+   成功更新订阅后把**原始正文**写到这里；reF1nd 的 provider/remote 在
+   没有 bbolt 缓存时会读 initial_path（remote.go: `loadInitialPath()`），
+   因此内核启动**不需要联网拉订阅** —— 这点很关键：源码 `StartContext()`
+   只有在「既没缓存也没 initial_path」时才同步 `fetch()`，一旦 fetch 失败
+   就直接返回错误，整个 sing-box 起不来（实测：`start provider/...: no
+   servers found` → FATAL）。 */
+function provider_seed_path(group_hash) {
+	return sprintf('%s/providers/%s.sub', HP_DIR, group_hash);
+}
+
+function provider_seed_exists(group_hash) {
+	let fp = null;
+	try {
+		fp = open(provider_seed_path(group_hash), 'r');
+	} catch (e) {
+		return false;
+	}
+	if (!fp)
+		return false;
+	try { fp.close(); } catch (e) {}
+	return true;
+}
+
+/* 全局面板测速地址：取第一个配了 urltest_url 的分组，兜底 google
+   generate_204（与 urltest 出站的默认值保持同一口径，别用 gstatic ——
+   它在 china_list 里且实测会把可用节点判成不可用）。 */
+function provider_probe_url() {
+	let url = null;
+	uci.foreach(uciconfig, uciroutingsetting, (cfg) => {
+		if (url !== null)
+			return;
+		const candidate = trim(cfg.urltest_url ?? '');
+		if (!isEmpty(candidate))
+			url = candidate;
+	});
+	return url ?? 'https://www.google.com/generate_204';
+}
+
+/* 原生 `providers`（reF1nd 1.14.4 的顶层字段）——恢复面板「代理供应商」页。
+   与已归档的 002 补丁（`clash_api.proxy_providers`，tags-only）不同，
+   原生 provider 的 outbounds 由内核自己解析订阅正文生成，因此：
+
+   · `initial_path` 指向插件写好的种子 → 启动不联网、不会因机场挂掉而
+     拖垮整个服务；内核随后按 `update_interval` 后台更新并自行填充
+     `subscriptionInfo`（已用/总量/到期）。
+   · provider 的节点会**同时**出现在 `/proxies` 里（名字形如 `机场名/节点名`），
+     这是原生设计的固有行为。
+   · 以下三种情况一律**不下发** provider（都会让内核起不来）：
+     1) `cache_file` 关闭 —— 内核报 `provider initial_path requires cache_file`；
+     2) 该机场一个节点都没有 —— 内核报 `no servers found`；
+     3) 种子文件还不存在（全新安装尚未成功更新过订阅）—— 会退化成启动时
+        同步拉取，机场不可达即 FATAL。等第一次订阅更新写入种子后自然出现。 */
+function build_native_providers() {
+	if (cache_file_enabled === '0')
+		return [];
+
+	let providers = [],
+	    used_names = {},
+	    subscription_names = normalize_list(uci.get(uciconfig, 'subscription', 'subscription_name')),
+	    probe_url = provider_probe_url(),
+	    sub_index = 0;
+
+	for (let suburl in normalize_list(uci.get(uciconfig, 'subscription', 'subscription_url'))) {
+		const subscription_name = subscription_names[sub_index];
+		sub_index++;
+
+		if (isEmpty(suburl) || isEmpty(trim(subscription_name ?? '')))
+			continue;
+
+		const url = replace(suburl, /#.*$/, ''),
+		      group_hash = md5(url);
+
+		let has_nodes = false;
+		uci.foreach(uciconfig, ucinode, (cfg) => {
+			if (cfg.grouphash === group_hash)
+				has_nodes = true;
+		});
+		if (!has_nodes)
+			continue;
+
+		if (!provider_seed_exists(group_hash))
+			continue;
+
+		push(providers, {
+			type: 'remote',
+			tag: unique_provider_name(subscription_provider_name(subscription_name), used_names),
+			url: url,
+			initial_path: provider_seed_path(group_hash),
+			/* 24h：与常见的机场流量刷新节奏相当；间隔过长会让面板的
+			   已用/到期长期不动，过短则等于每次重启都多下一遍订阅。 */
+			update_interval: '24h',
+			/* 不指定 `http_client`：内核会用「默认出站」下载（并打印一条
+			   1.14 的 deprecated 警告，功能到 1.16 前都有效）。
+			   试过 `http_client: {detour: 'direct-out'}` —— 实测被内核拒绝：
+			   `detour to an empty direct outbound makes no sense`
+			   （common/dialer/detour.go:64：显式 detour 指向「空 direct」即报错，
+			   只有 `defaultOutbound` 走的隐式路径才跳过该检查，而本项目的
+			   `direct-out` 正是空 direct）。 */
+			health_check: {
+				enabled: true,
+				url: probe_url,
+				interval: '10m',
+				timeout: '6s'
+			}
+		});
+	}
+
+	return providers;
+}
+
+/* 【当前不再被调用，保留作参考/后续重做原生 providers 的蓝本】
+   这是旧 002 补丁（已归档到 tools/sing-box-patches/archive-1.14.3/）的
+   `clash_api.proxy_providers` 数据结构：补丁内核会据此合成
+   `/providers/proxies`，`proxies` 里放的是 outbound tag 字符串而不是 proxy 对象，
+   键名沿用 Clash API 的 snake_case（`vehicle_type`/`updated_at`/`update_id`/
+   `subscription_info`）。
+   reF1nd 1.14.4 内核不再接受该字段，且其原生 providers 是顶层 `providers`
+   （内核自行拉订阅、自行生成 outbound），与本插件「订阅解析后展开成 outbound」
+   的模型重复，因此这里暂不下发。若日后改用原生 providers，可基于本函数改造。 */
 function build_proxy_providers() {
 	let providers = [],
 	    used_names = {},
@@ -943,15 +1096,17 @@ clash_api = {
 	   experimental.cache_file (see the cache_file block below), NEVER under clash_api.
 	   In sing-box 1.12+ clash_api.store_selected is rejected at startup (deprecated
 	   since 1.8.0, see experimental/clashapi/server.go) — emitting it there makes the
-	   Clash API abort. The stock reF1nd 1.14.3-reF1nd kernel's cache_file also lacked
-	   the field, but this repo's build-deploy.yml applies
-	   tools/sing-box-patches/003-add-cache-file-store-selected.patch which adds it back,
-	   so the patched kernel accepts cache_file.store_selected and persists the selected
-	   outbound across restarts. Outdated stock kernels without that patch would reject
-	   it as an unknown field. */
-	/* Native proxy providers for the patched reF1nd kernel. The kernel serves
-	   /providers/proxies from this list; empty in non-subscription modes. */
-	proxy_providers: build_proxy_providers()
+	   Clash API abort. The reF1nd 1.14.4-reF1nd kernel (like 1.14.3) still lacks the
+	   `store_selected` option on the global cache_file, so this repo's build-deploy.yml
+	   applies tools/sing-box-patches/003-add-cache-file-store-selected-1.14.4.patch which
+	   adds it back, so the patched kernel accepts cache_file.store_selected and persists
+	   the selected outbound across restarts. Outdated stock kernels without that patch
+	   would reject it as an unknown field. */
+	/* 不再下发 `proxy_providers`：它是旧 002 补丁的自定义字段，reF1nd 1.14.4 内核
+	   不认识（`unknown field "proxy_providers"` → 服务拒绝启动）。1.14.4 原生
+	   providers 是顶层字段且会自行拉订阅生成 outbound，与本插件模型重复，故不用。
+	   影响：面板的「代理供应商」页不再有数据（需要旧补丁内核才有该页），
+	   代理/分流/节点测速等功能不受影响。 */
 };
 /* Config helper end */
 
@@ -1195,6 +1350,35 @@ if (match(proxy_mode, /tun/))
 		udp_timeout: strToTime(udp_timeout),
 		stack: tcpip_stack
 	});
+if (ebpf_spec) {
+	/* 内核 eBPF 透明代理 inbound。字段遵循 sing-box 1.14.4 的 option.EBPFInboundOptions：
+	   local/shared 各自 {enabled, data_plane, ...}。四种模式都已确定
+	   local/shared 的 data_plane，这里直接照搬，不再做开关判断。 */
+	let ebpf_inbound = {
+		type: 'ebpf',
+		tag: 'ebpf-in',
+		network: ['tcp', 'udp']
+	};
+	let local_opt = { enabled: true, data_plane: ebpf_spec.local };
+	/* cgroup_path 只在 local=cgroup 时合法（sing-box: "local.cgroup_path requires
+	   local.data_plane=cgroup"），socket_assign 下不得下发。 */
+	if (ebpf_spec.local === 'cgroup' && !isEmpty(ebpf_cgroup_path))
+		local_opt.cgroup_path = ebpf_cgroup_path;
+	/* 默认跳过私有地址：LAN 内部访问不该被劫持（ebpf_bypass_private 默认开）。 */
+	if (ebpf_bypass_private === '1')
+		local_opt.bypass_private_address = true;
+	ebpf_inbound.local = local_opt;
+
+	let shared_opt = { enabled: true, data_plane: ebpf_spec.shared };
+	/* shared 数据面必须绑定网卡接口（sing-box 要求非空）。 */
+	if (!isEmpty(ebpf_interface))
+		shared_opt.interface = [ ebpf_interface ];
+	if (ebpf_bypass_private === '1')
+		shared_opt.bypass_private_address = true;
+	ebpf_inbound.shared = shared_opt;
+
+	push(config.inbounds, ebpf_inbound);
+}
 /* Inbound end */
 
 /* Outbound start */
@@ -1706,25 +1890,36 @@ if (!isEmpty(config.route) && !isEmpty(config.route.rule_set)) {
 }
 
 /* Experimental start */
-if (routing_mode in ['bypass_mainland_china', 'custom']) {
-	/* `proxy_providers` now lives inside `clash_api` (not at the top level):
-	   it is consumed by the patched reF1nd kernel, which synthesises the
-	   /providers/proxies objects from it. A stock (unpatched) sing-box would
-	   reject the unknown field, so this branch is only correct together with
-	   the kernel patch. All subscription nodes are still expanded into
-	   `outbounds`; the list above only teaches the panel about providers. */
+/* 必须**无条件**生成：`clash_api` 是面板（zashboard 等）唯一的入口，
+   `cache_file` 负责选中节点/FakeIP/DNS 缓存。
+   0.4.0 之前这段被 `if (routing_mode in ['bypass_mainland_china', 'custom'])`
+   包住，导致 gfwlist / proxy_mainland_china / global 三种路由模式下**根本没有
+   clash_api**（9095 不监听、面板连不上）也没有 cache_file —— 既有缺陷，随本次
+   一并修正（面板与路由模式无关）。
 
-	config.experimental = {
-		clash_api,
-		cache_file: {
-			enabled: cache_file_enabled !== '0',
-			path: cache_file_path || (HP_DIR + '/cache.db'),
-			store_dns: strToBool(cache_store_dns),
-			store_selected: cache_store_selected !== '0'
-		}
-	};
-}
+   关于 `proxy_providers`：它是旧 002 补丁（已归档）的自定义字段，reF1nd 1.14.4
+   内核不认识它，`sing-box check` 直接报
+   `experimental.clash_api.proxy_providers: json: unknown field "proxy_providers"`
+   并拒绝启动；而 1.14.4 原生的 providers 是**顶层**字段、由内核自己拉订阅并生成
+   outbound，与本插件「订阅解析后展开成 outbound」的模型重复（会多出一批无人引用
+   的 outbound 并重复下载订阅），因此不再下发该字段。 */
+config.experimental = {
+	clash_api,
+	cache_file: {
+		enabled: cache_file_enabled !== '0',
+		path: cache_file_path || (HP_DIR + '/cache.db'),
+		store_dns: strToBool(cache_store_dns),
+		store_selected: cache_store_selected !== '0'
+	}
+};
 /* Experimental end */
+
+/* Native providers（reF1nd 1.14.4 顶层字段）——面板「代理供应商」页的数据源。
+   条件不满足时返回空数组，removeBlankAttrs 会把空字段删掉，等于不下发。 */
+const native_providers = build_native_providers();
+if (length(native_providers) > 0)
+	config.providers = native_providers;
+/* Native providers end */
 
 /* 出站引用完整性 ------------------------------------------------------------
  * 0 节点（或删掉某个出站）之后，配置里会残留指向「选不出节点的分组」的引用。
