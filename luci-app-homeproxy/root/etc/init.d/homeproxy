@@ -889,12 +889,18 @@ sync_rulesets() {
 	sec_count="${sections:-$(uci -q show "$CONF" 2>/dev/null | grep -c "=ruleset")}"
 
 	if [ "$total" = "0" ]; then
-		log "规则集检查：当前没有已启用的远程规则集，跳过。"
-		if [ "${sec_count:-0}" -gt 0 ]; then
-			log "提示：配置里共有 ${sec_count} 个 ruleset 段，但没有一条满足「启用 + 远程」。请到规则集页面确认每条的「启用」开关与「类型」（类型为本地的规则集不会下载）。"
-		else
-			log "提示：配置里没有任何 ruleset 段。规则集需要在「规则集」页手动添加（如 geosite-cn），插件不预置；添加后点「保存并应用」即会下载。"
-		fi
+		# 只有 custom 模式才需要用户手动维护规则集；bypass/gfwlist 使用内置规则集，
+		# 此时提示"没有任何 ruleset 段"属于误导，直接跳过。
+		case "$(uci -q get "$CONF.config.routing_mode" 2>/dev/null)" in
+		custom)
+			log "规则集检查：当前没有已启用的远程规则集，跳过。"
+			if [ "${sec_count:-0}" -gt 0 ]; then
+				log "提示：配置里共有 ${sec_count} 个 ruleset 段，但没有一条满足「启用 + 远程」。请到规则集页面确认每条的「启用」开关与「类型」（类型为本地的规则集不会下载）。"
+			else
+				log "提示：配置里没有任何 ruleset 段。规则集需要在「规则集」页手动添加（如 geosite-cn），插件不预置；添加后点「保存并应用」即会下载。"
+			fi
+			;;
+		esac
 		return 0
 	fi
 
