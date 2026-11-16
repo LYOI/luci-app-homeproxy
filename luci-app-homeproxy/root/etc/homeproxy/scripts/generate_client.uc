@@ -1160,7 +1160,9 @@ if (!isEmpty(main_node)) {
 		tag: 'main-dns',
 		domain_resolver: {
 			server: 'default-dns',
-			strategy: (ipv6_support !== '1') ? 'ipv4_only' : null
+			/* 始终优先 IPv4：多数节点只提供 IPv4 出口，DNS 若先返回 IPv6
+			   会导致目标不可达（表现为 000 超时）。IPv6 仍作为备选保留。 */
+			strategy: (ipv6_support !== '1') ? 'ipv4_only' : 'prefer_ipv4'
 		},
 		detour: 'main-out',
 		...parse_dnsserver(dns_server, 'tcp')
@@ -2065,7 +2067,8 @@ if (uci.get(uciconfig, ucimain, 'region_routes')) {
 		if (eq <= 0)
 			continue;
 
-		const rr_domain = trim(substr(line, 0, eq));
+		/* 域名统一小写：DNS 本身不区分大小写，避免用户写 Google.com 匹配不上 */
+		const rr_domain = lc(trim(substr(line, 0, eq)));
 		const rr_region_raw = trim(substr(line, eq + 1));
 		/* 允许写中文地区名或英文代码，统一归一成大写代码 */
 		const rr_region = HP_REGION_MAP[rr_region_raw] || uc(rr_region_raw);
