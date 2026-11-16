@@ -4472,3 +4472,33 @@ msgstr "每行一条规则：<code>域名 = 地区</code>。示例：<br/><code>
 
 msgid "Group nodes by region (Hong Kong / Japan / US ...) and build one urltest group per region. Routing Rules can then point a domain at <code>region-HK</code>, <code>region-JP</code>, <code>region-US</code> and the kernel will always pick the fastest node inside that region."
 msgstr "按节点标签中的地区（香港 / 日本 / 美国 等）分组，每个地区自动生成一个 urltest 组。路由规则中把域名指向 <code>region-HK</code>、<code>region-JP</code>、<code>region-US</code> 即可，内核会自动选择该地区内延迟最低的节点。"
+
+msgid "Simple Routing"
+msgstr "简单分流"
+
+msgid "Simple rule"
+msgstr "分流规则"
+
+msgid "Add a simple rule"
+msgstr "添加分流规则"
+
+msgid "Match type"
+msgstr "匹配方式"
+
+msgid "Exact domain"
+msgstr "完整域名"
+
+msgid "Domain / keyword"
+msgstr "域名 / 关键词"
+
+msgid "Default proxy (auto)"
+msgstr "默认代理（自动选优）"
+
+msgid "Region"
+msgstr "地区"
+
+msgid "Only used to identify the rule in this list."
+msgstr "仅用于在本列表中区分这条规则。"
+
+msgid "Rules are matched from top to bottom; the first hit wins. Traffic that matches nothing goes through the built-in routing (direct for mainland China, proxy for the rest)."
+msgstr "规则从上到下依次匹配，命中第一条即生效；未命中任何规则的流量按内置分流处理（国内直连、国外走代理）。"

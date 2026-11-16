@@ -1295,7 +1295,7 @@ return view.extend({
 
 			this.value('nil', _('Stop the plugin'));
 			this.value('direct-out', _('Direct'));
-			this.value('block-out', _('Block'));
+			this.value('block-out', _('封锁'));
 			uci.sections(data[0], 'routing_node', (res) => {
 				if (res.enabled === '1')
 					this.value(res['.name'], res.label);
@@ -2437,6 +2437,78 @@ return view.extend({
 			_('Match process path using regular expression.'));
 		so.modalonly = true;
 		/* Routing rules end */
+
+		/* Simple routing start
+		   简单分流：域名/关键词 → 指定出站（地区组 / main-out / direct-out）。
+		   与「路由规则」不同，这里所有分流模式都生效，未命中的仍走内置分流。 */
+		s.tab('simple_rule', _('简单分流'));
+
+		o = s.taboption('simple_rule', form.SectionValue, '_simple_rule', form.GridSection, 'simple_rule');
+		ss = o.subsection;
+		ss.addremove = true;
+		ss.rowcolors = true;
+		ss.sortable = true;
+		ss.nodescriptions = true;
+		ss.modaltitle = L.bind(hp.loadModalTitle, this, _('分流规则'), _('添加分流规则'), data[0]);
+		ss.sectiontitle = L.bind(hp.loadDefaultLabel, this, data[0]);
+		hp.dedupeNameColumn(ss);
+		hp.moveEnableColumn(ss);
+		hp.prependIndexColumn(ss, _('Sequence'));
+		ss.renderSectionAdd = L.bind(hp.renderSectionAdd, this, ss, null,
+			_('仅用于在本列表中区分这条规则。'),
+			_('规则从上到下依次匹配，命中第一条即生效；未匹配任何规则的流量按内置分流处理（国内直连、国外走代理）。'));
+
+		so = ss.option(form.ListValue, 'match', _('匹配方式'));
+		so.value('suffix', _('Domain suffix'));
+		so.value('keyword', _('Domain keyword'));
+		so.value('domain', _('完整域名'));
+		so.default = 'suffix';
+		so.rmempty = false;
+
+		so = ss.option(form.TextValue, 'value', _('域名 / 关键词'));
+		so.placeholder = 'youtube.com';
+		so.rmempty = false;
+
+		so = ss.option(form.ListValue, 'outbound', _('Outbound'));
+		/* 出站选项按当前订阅里的节点动态生成：只有真的存在该地区节点，
+		   才会出现对应的 region-XX，避免选到空组（空组会退化成直连）。 */
+		so.load = function(section_id) {
+			delete this.keylist;
+			delete this.vallist;
+
+			this.value('main-out', _('默认代理（自动选优）'));
+			this.value('direct-out', _('Direct'));
+			this.value('block-out', _('Block'));
+
+			var region_map = {
+				'香港': 'HK', '台湾': 'TW', '日本': 'JP', '韩国': 'KR', '新加坡': 'SG',
+				'美国': 'US', '英国': 'UK', '德国': 'DE', '法国': 'FR', '荷兰': 'NL',
+				'加拿大': 'CA', '澳大利亚': 'AU', '俄罗斯': 'RU', '印度': 'IN', '土耳其': 'TR'
+			};
+			var found = {};
+			var nodes = uci.sections(data[0], 'node') || [];
+
+			for (var i = 0; i < nodes.length; i++) {
+				var label = nodes[i].label || '';
+
+				if (nodes[i].enabled === '0')
+					continue;
+
+				for (var cn in region_map) {
+					if (label.indexOf(cn) >= 0) {
+						found[region_map[cn]] = true;
+						break;
+					}
+				}
+			}
+
+			for (var code in found)
+				this.value('region-' + code, _('地区') + '：' + code);
+
+			return this.super('load', section_id);
+		};
+		so.rmempty = false;
+		/* Simple routing end */
 
 		/* DNS settings start */
 		s.tab('dns', _('DNS Settings'));
@@ -3678,59 +3750,6 @@ return view.extend({
 		ss = o.subsection;
 
 		/* Interface control start */
-		ss.tab('simple_rule', _('Simple Routing'));
-
-		/* 简单分流：域名/关键词 → 指定出站。未匹配的走内置分流。 */
-		o = ss.taboption('simple_rule', form.SectionValue, '_simple_rule', form.GridSection, 'simple_rule');
-		let sso = o.subsection;
-
-		so = sso.option(form.ListValue, 'match', _('Match'));
-		so.value('suffix', _('Domain suffix'));
-		so.value('keyword', _('Domain keyword'));
-		so.value('domain', _('Exact domain'));
-		so.default = 'suffix';
-		so.rmempty = false;
-
-		so = sso.option(form.TextValue, 'value', _('Domain / keyword'));
-		so.rmempty = false;
-
-		so = sso.option(form.ListValue, 'outbound', _('Outbound'));
-		/* 出站选项按当前订阅里的节点动态生成：只有真的存在该地区节点，
-		   才会出现对应的 region-XX，避免选到空组（会退化成直连）。 */
-		so.load = function(section_id) {
-			delete this.keylist;
-			delete this.vallist;
-
-			this.value('main-out', _('Default proxy (auto)'));
-			this.value('direct-out', _('Direct'));
-			this.value('block-out', _('Block'));
-
-			var region_map = {
-				'香港': 'HK', '台湾': 'TW', '日本': 'JP', '韩国': 'KR', '新加坡': 'SG',
-				'美国': 'US', '英国': 'UK', '德国': 'DE', '法国': 'FR', '荷兰': 'NL',
-				'加拿大': 'CA', '澳大利亚': 'AU', '俄罗斯': 'RU', '印度': 'IN', '土耳其': 'TR'
-			};
-			var found = {};
-			var nodes = uci.sections('homeproxy', 'node') || [];
-
-			for (var i = 0; i < nodes.length; i++) {
-				var label = nodes[i].label || '';
-
-				for (var cn in region_map) {
-					if (label.indexOf(cn) >= 0) {
-						found[region_map[cn]] = true;
-						break;
-					}
-				}
-			}
-
-			for (var code in found)
-				this.value('region-' + code, _('Region') + ': ' + code);
-
-			return this.super('load', section_id);
-		};
-		so.rmempty = false;
-
 		ss.tab('interface', _('Interface Control'));
 
 		so = ss.taboption('interface', widgets.DeviceSelect, 'listen_interfaces', _('Listen interfaces'),
