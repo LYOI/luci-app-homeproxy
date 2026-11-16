@@ -1731,9 +1731,23 @@ config.route = {
 /* Routing rules */
 if (!isEmpty(main_node)) {
 	/* Avoid DNS loop */
+	/* 路由阶段的兜底解析器必须用「干净」的上游：
+	   客户端送来的是域名（mixed/CONNECT）时，内核要先把域名解析成 IP 才能选路，
+	   这个解析结果直接决定连到哪台服务器。用 china-dns（阿里）解析境外域名会
+	   拿到污染地址（实测 www.google.com 被解析成 104.244.42.197，Twitter 的 IP），
+	   于是 TLS 握手必然失败、表现为 curl exit 35 / 超时。
+	   统一走 main-dns（CF DoH，经代理，结果干净）；国内域名本来在 DNS 阶段就由
+	   china-dns 解析好、按 IP 分流，不会额外变慢。 */
+	/* 这个解析器是「内核自己要发请求时怎么解域名」，最关键的是**节点地址**：
+	   订阅里的节点大多是域名（hk1.xxx.the-best-airport.com）。如果这里指向
+	   main-dns（经代理），就会出现死锁——连节点之前要先解析节点域名，而解析
+	   又要走节点，表现为所有节点延迟测试 Timeout、面板显示连不上。
+	   所以必须用直连侧的解析器（china-dns：阿里 DoH，直连、干净）。
+	   客户端流量的域名由 dnsmasq → 内核 DNS 规则处理（国内阿里 / 国外 CF），
+	   不经过这个兜底解析器，因此不会受污染影响。 */
 	config.route.default_domain_resolver = {
 		action: 'route',
-		server: (routing_mode === 'bypass_mainland_china') ? 'china-dns' : 'default-dns',
+		server: 'china-dns',
 		strategy: (ipv6_support !== '1') ? 'prefer_ipv4' : null
 	};
 
@@ -2047,13 +2061,21 @@ function ensure_outbound_refs(config) {
 	if (dangling(config.route?.final))
 		config.route.final = 'direct-out';
 
+	/* 指向「不存在的地区组」的规则不能降级成直连：
+	   订阅换过之后某个地区可能整个消失（例如这次只剩日本节点，region-HK/US 不存在），
+	   若降级成 direct-out，用户明明写了「youtube 走香港」，实际变成直连被墙，
+	   表现就是所有被墙站点超时。这里统一降级到 main-out（默认代理）。 */
+	function fallback_outbound(tag) {
+		return (type(tag) === 'string' && match(tag, /^region-/)) ? 'main-out' : 'direct-out';
+	}
+
 	for (let rule in config.route?.rules ?? []) {
 		if (type(rule.outbound) === 'array') {
 			for (let i = 0; i < length(rule.outbound); i++)
 				if (dangling(rule.outbound[i]))
-					rule.outbound[i] = 'direct-out';
+					rule.outbound[i] = fallback_outbound(rule.outbound[i]);
 		} else if (dangling(rule.outbound)) {
-			rule.outbound = 'direct-out';
+			rule.outbound = fallback_outbound(rule.outbound);
 		}
 	}
 
