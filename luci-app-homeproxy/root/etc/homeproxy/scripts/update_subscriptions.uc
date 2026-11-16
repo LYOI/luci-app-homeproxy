@@ -1674,6 +1674,23 @@ function local_proxy_listening(proxy) {
 	return false;
 }
 
+/* 「通过代理更新」时，内核可能还在启动中（点保存并应用会先重启服务，
+   订阅更新几乎与内核并行触发）。实测 01:58:53 的更新就是这样失败的：
+   5330 还没监听 → 直接放弃 → 保留旧节点。
+   这里改成先等一会儿，最多 ~30 秒，轮询端口起来再抓。 */
+function wait_proxy_listening(proxy, tries) {
+	let n = tries || 30;
+
+	while (n-- > 0) {
+		if (local_proxy_listening(proxy))
+			return true;
+
+		system('sleep 1');
+	}
+
+	return local_proxy_listening(proxy);
+}
+
 /* 抓一个订阅：**直连优先**，直连拿不到正文、且开关打开（proxy_url 非空）
    时才用本地代理重试一次。两跳的实际走向都写进日志，失败时两跳的原因都要
    看得见——否则「直连没通」和「代理也没通」在日志上无法区分。
@@ -1765,9 +1782,15 @@ function fetch_subscription(url, ua) {
 		/* 端口没有监听者（内核没起/未就绪）时这一跳必然失败。不退回直连，
 		   否则就违背了「只走代理」的语义；明确记一行并返回失败（保留旧节点）。 */
 		if (!local_proxy_listening(proxy_url)) {
-			log(sprintf('Proxy-only mode: local proxy %s is not listening; skipped (kept previous nodes).', proxy_url));
+			log(sprintf('Proxy-only mode: local proxy %s is not listening yet; waiting up to 30s for the core to come up.', proxy_url));
 
-			return null;
+			if (!wait_proxy_listening(proxy_url, 30)) {
+				log(sprintf('Proxy-only mode: local proxy %s still not listening after 30s; skipped (kept previous nodes).', proxy_url));
+
+				return null;
+			}
+
+			log(sprintf('Proxy-only mode: local proxy %s is ready, continuing.', proxy_url));
 		}
 
 		const proxied = fetch_with_dns_retry(url, ua, proxy_url);
