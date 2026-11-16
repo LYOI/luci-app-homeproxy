@@ -1184,7 +1184,13 @@ if (!isEmpty(main_node)) {
 	if (ipv6_support !== '1')
 		push(config.dns.rules, {
 			query_type: [ 'AAAA' ],
-			action: 'reject'
+			/* 用 predefined + NOERROR 而不是 reject：
+			   reject 返回 REFUSED，musl（路由器本机的 curl/wget）会把
+			   这次失败当成整体解析失败，表现为 curl: (6) Could not resolve host，
+			   订阅更新、插件自身的下载全部抓不到。Windows 客户端会忽略该错误，
+			   所以只有路由器本机受影响。NOERROR 空应答等价于「没有 AAAA」。 */
+			action: 'predefined',
+			rcode: 'NOERROR'
 		});
 
 	if (length(direct_domain_list))
