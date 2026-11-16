@@ -2166,8 +2166,12 @@ if (uci.get(uciconfig, ucimain, 'region_routes')) {
 }
 
 /* FakeIP 兜底规则：放在所有国内/直连规则之后，
-   未命中的（即国外）域名才返回假 IP。 */
-if (!isEmpty(main_node) && length(filter(config.dns.servers, (d) => d?.type === 'fakeip'))) {
+   未命中的（即国外）域名才返回假 IP。
+   注意：防火墙把 198.18.0.0/15 当作保留地址直接 return，redirect/tproxy 模式下
+   假 IP 的流量不会被转发进内核，开启后表现为「所有国外站点连不上」。
+   因此默认关闭，需要时用 uci set homeproxy.config.fakeip_enable=1 打开。 */
+if (uci.get(uciconfig, ucimain, 'fakeip_enable') === '1' &&
+    !isEmpty(main_node) && length(filter(config.dns.servers, (d) => d?.type === 'fakeip'))) {
 	push(config.dns.rules, {
 		query_type: [ 'A', 'AAAA' ],
 		action: 'route',
