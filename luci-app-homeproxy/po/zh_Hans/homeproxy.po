@@ -4458,3 +4458,12 @@ msgstr "后缀匹配（域名 + 全部子域）"
 
 msgid "Keyword match (substring, may over-match)"
 msgstr "关键词匹配（子串，可能误伤）"
+
+msgid "Region Outbound"
+msgstr "出站地区控制"
+
+msgid "Auto-generate region groups"
+msgstr "自动生成地区分组"
+
+msgid "Group nodes by region (Hong Kong / Japan / US ...) and build one urltest group per region. Routing Rules can then point a domain at <code>region-香港</code>, <code>region-日本</code>, <code>region-美国</code> and the kernel will always pick the fastest node inside that region."
+msgstr "按节点标签中的地区（香港 / 日本 / 美国 等）分组，每个地区自动生成一个 urltest 组。路由规则中把域名指向 <code>region-香港</code>、<code>region-日本</code>、<code>region-美国</code> 即可，内核会自动选择该地区内延迟最低的节点。"

@@ -2005,5 +2005,44 @@ function ensure_outbound_refs(config) {
 
 system('mkdir -p ' + RUN_DIR);
 system('mkdir -p ' + RULESET_DIR);
+/* 出站地区控制：按节点标签里的地区关键词，自动为该地区生成一个 urltest 组。
+   路由规则可直接把域名指向 region-香港 / region-日本 这类出站。 */
+if (uci.get(uciconfig, ucimain, 'region_groups_enable') !== '0') {
+	const HP_REGIONS = [ '香港', '台湾', '日本', '韩国', '新加坡', '美国', '英国',
+	                     '德国', '法国', '荷兰', '加拿大', '澳大利亚', '俄罗斯' ];
+	const region_groups = {};
+
+	uci.foreach(uciconfig, ucinode, (cfg) => {
+		const tag = get_section_outbound_tag(cfg['.name']);
+		const label = cfg.label || '';
+
+		if (isEmpty(tag) || !isSectionEnabled(cfg.enabled))
+			return;
+		/* 只处理已经生成出站的节点（避免引用不存在的 tag） */
+		if (!length(filter(config.outbounds, (ob) => ob?.tag === tag)))
+			return;
+
+		for (let i = 0; i < length(HP_REGIONS); i++) {
+			if (index(label, HP_REGIONS[i]) >= 0) {
+				if (!region_groups[HP_REGIONS[i]])
+					region_groups[HP_REGIONS[i]] = [];
+				push(region_groups[HP_REGIONS[i]], tag);
+				break;
+			}
+		}
+	});
+
+	for (let region in region_groups) {
+		push(config.outbounds, {
+			type: 'urltest',
+			tag: 'region-' + region,
+			outbounds: region_groups[region],
+			url: 'https://www.google.com/generate_204',
+			interval: '300s',
+			tolerance: 50
+		});
+	}
+}
+
 ensure_outbound_refs(config);
 writefile(RUN_DIR + '/sing-box-c.json', sprintf('%.J\n', removeBlankAttrs(config)));

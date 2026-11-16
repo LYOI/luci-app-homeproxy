@@ -3678,6 +3678,17 @@ return view.extend({
 		ss = o.subsection;
 
 		/* Interface control start */
+		ss.tab('region_outbound', _('Region Outbound'));
+
+		/* 出站地区控制：按节点标签里的地区关键词自动建 urltest 组，
+		   每个组内部自动挑该地区延迟最低的节点。 */
+		so = ss.taboption('region_outbound', form.Flag, 'region_groups_enable',
+			_('Auto-generate region groups'),
+			_('Group nodes by region (Hong Kong / Japan / US ...) and build one urltest group per region. ' +
+			  'Routing Rules can then point a domain at <code>region-香港</code>, <code>region-日本</code>, <code>region-美国</code> and the kernel will always pick the fastest node inside that region.'));
+		so.default = so.enabled;
+		so.rmempty = false;
+
 		ss.tab('interface', _('Interface Control'));
 
 		so = ss.taboption('interface', widgets.DeviceSelect, 'listen_interfaces', _('Listen interfaces'),
