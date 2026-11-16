@@ -3689,6 +3689,17 @@ return view.extend({
 		so.default = so.enabled;
 		so.rmempty = false;
 
+		so = ss.taboption('region_outbound', form.TextValue, 'region_routes',
+			_('Domain → region'),
+			_('One rule per line: <code>domain = region</code>. Example:<br/>' +
+			  '<code>youtube.com = 美国</code><br/>' +
+			  '<code>google.com = 日本</code><br/>' +
+			  'Region must match a generated group (香港 / 日本 / 美国 ...). ' +
+			  'Matching is by domain suffix, so subdomains are covered.'));
+		so.rows = 8;
+		so.monospace = true;
+		so.placeholder = 'youtube.com = 美国\ngoogle.com = 日本';
+
 		ss.tab('interface', _('Interface Control'));
 
 		so = ss.taboption('interface', widgets.DeviceSelect, 'listen_interfaces', _('Listen interfaces'),

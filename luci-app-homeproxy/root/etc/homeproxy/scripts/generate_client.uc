@@ -2044,5 +2044,36 @@ if (uci.get(uciconfig, ucimain, 'region_groups_enable') !== '0') {
 	}
 }
 
+/* 出站地区控制：把「域名 = 地区」规则插到路由规则最前面。
+   优先级高于内置分流，且不受 routing_mode 限制（bypass/gfwlist 同样生效）。
+   解析用字符串切分而非正则，避免 ucode 正则对 \s 的处理差异。 */
+if (uci.get(uciconfig, ucimain, 'region_routes')) {
+	const rr_raw = uci.get(uciconfig, ucimain, 'region_routes') || '';
+	const rr_lines = split(replace(rr_raw, /\r/g, ''), '\n');
+	const rr_rules = [];
+
+	for (let i = 0; i < length(rr_lines); i++) {
+		const line = trim(rr_lines[i]);
+		const eq = index(line, '=');
+
+		if (eq <= 0)
+			continue;
+
+		const rr_domain = trim(substr(line, 0, eq));
+		const rr_region = trim(substr(line, eq + 1));
+
+		if (!rr_domain || !rr_region)
+			continue;
+
+		push(rr_rules, {
+			domain_suffix: [ rr_domain ],
+			outbound: 'region-' + rr_region
+		});
+	}
+
+	if (length(rr_rules))
+		config.route.rules = [ ...rr_rules, ...(config.route.rules ?? []) ];
+}
+
 ensure_outbound_refs(config);
 writefile(RUN_DIR + '/sing-box-c.json', sprintf('%.J\n', removeBlankAttrs(config)));
