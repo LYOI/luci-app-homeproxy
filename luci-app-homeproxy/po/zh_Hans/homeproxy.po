@@ -4465,11 +4465,10 @@ msgstr "出站地区控制"
 msgid "Auto-generate region groups"
 msgstr "自动生成地区分组"
 
-msgid "Group nodes by region (Hong Kong / Japan / US ...) and build one urltest group per region. Routing Rules can then point a domain at <code>region-香港</code>, <code>region-日本</code>, <code>region-美国</code> and the kernel will always pick the fastest node inside that region."
-msgstr "按节点标签中的地区（香港 / 日本 / 美国 等）分组，每个地区自动生成一个 urltest 组。路由规则中把域名指向 <code>region-香港</code>、<code>region-日本</code>、<code>region-美国</code> 即可，内核会自动选择该地区内延迟最低的节点。"
-
-msgid "Domain → region"
 msgstr "域名 → 地区"
 
 msgid "One rule per line: <code>domain = region</code>. Example:<br/><code>youtube.com = US</code><br/><code>google.com = JP</code><br/>Region codes: <code>HK JP US SG TW KR UK DE FR NL CA AU RU</code>; Chinese names (香港/日本/美国 ...) are also accepted. Matching is by domain suffix, so subdomains are covered."
 msgstr "每行一条规则：<code>域名 = 地区</code>。示例：<br/><code>youtube.com = US</code><br/><code>google.com = JP</code><br/>地区代码：<code>HK JP US SG TW KR UK DE FR NL CA AU RU</code>；也支持中文名（香港/日本/美国 等）。按域名后缀匹配，自动覆盖所有子域。"
+
+msgid "Group nodes by region (Hong Kong / Japan / US ...) and build one urltest group per region. Routing Rules can then point a domain at <code>region-香港</code>, <code>region-日本</code>, <code>region-美国</code> and the kernel will always pick the fastest node inside that region."
+msgstr "按节点标签中的地区（香港 / 日本 / 美国 等）分组，每个地区自动生成一个 urltest 组。路由规则中把域名指向 <code>region-HK</code>、<code>region-JP</code>、<code>region-US</code> 即可，内核会自动选择该地区内延迟最低的节点。"

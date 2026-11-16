@@ -3685,7 +3685,7 @@ return view.extend({
 		so = ss.taboption('region_outbound', form.Flag, 'region_groups_enable',
 			_('Auto-generate region groups'),
 			_('Group nodes by region (Hong Kong / Japan / US ...) and build one urltest group per region. ' +
-			  'Routing Rules can then point a domain at <code>region-香港</code>, <code>region-日本</code>, <code>region-美国</code> and the kernel will always pick the fastest node inside that region.'));
+			  'Routing Rules can then point a domain at <code>region-HK</code>, <code>region-JP</code>, <code>region-US</code> and the kernel will always pick the fastest node inside that region.'));
 		so.default = so.enabled;
 		so.rmempty = false;
 
