@@ -3789,6 +3789,13 @@ return view.extend({
 		/* Direct domain list start */
 		ss.tab('direct_domain_list', _('Direct Domain List'));
 
+		/* 匹配方式：suffix 覆盖子域且不误伤，keyword 是子串匹配（可能命中别的域名） */
+		so = ss.taboption('direct_domain_list', form.ListValue, 'direct_match_mode', _('Match mode'));
+		so.value('domain_suffix', _('Suffix match (domain + all subdomains)'));
+		so.value('domain_keyword', _('Keyword match (substring, may over-match)'));
+		so.default = 'domain_suffix';
+		so.depends({'homeproxy.config.routing_mode': 'custom', '!reverse': true});
+
 		so = ss.taboption('direct_domain_list', form.TextValue, '_direct_domain_list');
 		so.rows = 10;
 		so.monospace = true;

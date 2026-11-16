@@ -1716,16 +1716,17 @@ if (!isEmpty(main_node)) {
 
 	/* Rule set */
 	/* Direct list */
-	if (length(direct_domain_list))
+	if (length(direct_domain_list)) {
+		const direct_mode = uci.get(uciconfig, ucimain, 'direct_match_mode') || 'domain_suffix';
+		const direct_rule = {};
+		direct_rule[direct_mode] = direct_domain_list;
+
 		push(config.route.rule_set, {
 			type: 'inline',
 			tag: 'direct-domain',
-			rules: [
-				{
-					domain_keyword: direct_domain_list,
-				}
-			]
+			rules: [ direct_rule ]
 		});
+	}
 
 	/* Proxy list */
 	if (length(proxy_domain_list))

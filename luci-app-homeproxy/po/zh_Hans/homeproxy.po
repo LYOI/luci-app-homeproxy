@@ -4449,3 +4449,12 @@ msgstr "有效 uuid"
 
 #~ msgid "Enable cache"
 #~ msgstr "启用缓存"
+
+msgid "Match mode"
+msgstr "匹配方式"
+
+msgid "Suffix match (domain + all subdomains)"
+msgstr "后缀匹配（域名 + 全部子域）"
+
+msgid "Keyword match (substring, may over-match)"
+msgstr "关键词匹配（子串，可能误伤）"
