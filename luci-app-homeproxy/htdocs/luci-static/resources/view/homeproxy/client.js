@@ -3868,25 +3868,18 @@ return view.extend({
 		so.default = 'domain_suffix';
 		so.depends({'homeproxy.config.routing_mode': 'custom', '!reverse': true});
 
-		so = ss.taboption('direct_domain_list', form.TextValue, '_direct_domain_list');
+		/* 直连域名列表：存在 uci（config.direct_domains），不再写 resources/
+		   direct_list.txt。原因：文件型字段不参与 LuCI 的变更集，改完之后
+		   顶部永远显示「没有待应用的更改」，容易让人以为没保存；改成 uci
+		   选项后，脏标记、导入导出、备份都按常规路径工作。
+		   每行一个域名，后缀匹配（domain + 所有子域）。 */
+		so = ss.taboption('direct_domain_list', form.TextValue, 'direct_domains',
+			_('Direct domain list'));
 		so.rows = 10;
 		so.monospace = true;
-		so.datatype = 'hostname';
+		so.placeholder = _('One domain per line, e.g. example.com');
 		so.depends({'homeproxy.config.routing_mode': 'custom', '!reverse': true});
-		so.load = function(/* ... */) {
-			return L.resolveDefault(callReadDomainList('direct_list')).then((res) => {
-				return res.content;
-			}, {});
-		}
-		so.write = function(_section_id, value) {
-			return callWriteDomainList('direct_list', value);
-		}
-		so.remove = function(/* ... */) {
-			let routing_mode = this.section.formvalue('config', 'routing_mode');
-			if (routing_mode !== 'custom')
-				return callWriteDomainList('direct_list', '');
-			return true;
-		}
+		so.rmempty = true;
 		so.validate = function(section_id, value) {
 			if (section_id && value)
 				for (let i of value.split('\n'))

@@ -190,7 +190,13 @@ if (routing_mode !== 'custom') {
 	}
 	dns_default_strategy = (ipv6_support !== '1') ? 'ipv4_only' : null;
 
-	direct_domain_list = trim(readfile(HP_DIR + '/resources/direct_list.txt'));
+	/* 直连域名：优先读 uci（config.direct_domains，界面里的文本框）。
+	   读不到再退回旧的 resources/direct_list.txt —— 升级场景下老配置只有
+	   文件、没有 uci 选项，由 migrate_config.uc 搬过去；这里的兜底保证
+	   在迁移完成前也不会突然丢掉名单。 */
+	direct_domain_list = trim(uci.get(uciconfig, ucimain, 'direct_domains') || '');
+	if (!length(direct_domain_list))
+		direct_domain_list = trim(readfile(HP_DIR + '/resources/direct_list.txt'));
 	if (direct_domain_list)
 		direct_domain_list = split(direct_domain_list, /[\r\n]/);
 

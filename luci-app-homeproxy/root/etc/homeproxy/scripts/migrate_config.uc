@@ -7,7 +7,7 @@
 
 'use strict';
 
-import { popen } from 'fs';
+import { popen, readfile, writefile } from 'fs';
 import { cursor } from 'uci';
 import { isEmpty, parseURL } from 'homeproxy';
 
@@ -501,6 +501,25 @@ uci.foreach(uciconfig, uciroutingnode, (cfg) => {
 for (let k in [ 'main_urltest_interval', 'main_udp_urltest_interval' ]) {
 	if (uci.get(uciconfig, ucimain, k) === '180')
 		uci.set(uciconfig, ucimain, k, '300');
+}
+
+/* 直连域名：从 resources/direct_list.txt 迁到 config.direct_domains。
+   文件型字段不参与 LuCI 的变更集，界面顶部永远不显示「待应用」，
+   所以改成 uci 选项。只在 uci 还是空的时候搬一次，搬完把旧文件清空，
+   避免两处内容打架（生成脚本仍然保留读文件兜底，见 generate_client.uc）。 */
+if (isEmpty(uci.get(uciconfig, ucimain, 'direct_domains'))) {
+	let legacy = '';
+
+	try {
+		legacy = trim(readfile('/etc/homeproxy/resources/direct_list.txt') || '');
+	} catch (e) {
+		legacy = '';
+	}
+
+	if (length(legacy)) {
+		uci.set(uciconfig, ucimain, 'direct_domains', legacy);
+		writefile('/etc/homeproxy/resources/direct_list.txt', '');
+	}
 }
 
 if (!isEmpty(uci.changes(uciconfig)))
