@@ -31,6 +31,26 @@ log() {
 	echo -e "$(date "+%Y-%m-%d %H:%M:%S") $*" >> "$LOG_PATH"
 }
 
+PROXY_URL="http://127.0.0.1:$(uci -q get homeproxy.infra.mixed_port 2>/dev/null || echo 5330)"
+
+# jsdelivr 的公开版本接口，不限次。先直连、失败再走本地代理 —— 现场
+# （2026-11-17 15:13）直连 data.jsdelivr.com 返回 000，经 127.0.0.1:5330 才通。
+jsdelivr_version() {
+	local repo="$1" v
+
+	v=$(curl -sL --http1.1 --connect-timeout 10 --max-time 30 \
+		"https://data.jsdelivr.com/v1/packages/gh/$repo" 2>"/dev/null" \
+		| jsonfilter -e "@.versions[0].version" 2>"/dev/null")
+	[ -n "$v" ] && { printf '%s' "$v"; return 0; }
+
+	v=$(curl -sL --http1.1 --connect-timeout 10 --max-time 30 -x "$PROXY_URL" \
+		"https://data.jsdelivr.com/v1/packages/gh/$repo" 2>"/dev/null" \
+		| jsonfilter -e "@.versions[0].version" 2>"/dev/null")
+	[ -n "$v" ] && printf '%s' "$v"
+
+	return 0
+}
+
 to_upper() {
 	echo -e "$1" | tr "[a-z]" "[A-Z]"
 }
@@ -133,6 +153,17 @@ check_list_update() {
 	local API_RESP API_REASON API_SNIP
 	API_RESP=$(curl -sL --http1.1 --connect-timeout 10 --max-time 30 ${GITHUB_TOKEN:+-H "Authorization: Bearer $GITHUB_TOKEN"} "https://api.github.com/repos/$REPO_NAME/releases/latest" 2>"/dev/null")
 	local NEW_VER=$(printf '%s' "$API_RESP" | jsonfilter -e "@.tag_name")
+
+	# GitHub API 未认证每小时只有 60 次，连点几次「检查更新」就撞限流
+	#（现场 2026-11-17 15:12：四份列表全部 rate limit，remaining=0）。
+	# jsdelivr 有等价的公开版本接口且不限次，作为兜底，避免这块功能在没填
+	# Token 的机器上形同虚设。
+	if [ -z "$NEW_VER" ]; then
+		NEW_VER=$(jsdelivr_version "$REPO_NAME")
+
+		[ -n "$NEW_VER" ] && log "[$(to_upper "$LIST_FILE")] GitHub API 不可用（多为限流），改用 jsdelivr 版本接口：$NEW_VER"
+	fi
+
 	if [ -z "$NEW_VER" ]; then
 		API_REASON=$(printf '%s' "$API_RESP" | jsonfilter -e "@.message" 2>"/dev/null")
 		API_SNIP=$(printf '%s' "$API_RESP" | tr '\n\t' '  ' | head -c 120)
@@ -168,14 +199,23 @@ check_list_update() {
 	# 用 `<list>.<repo_file>` 做前缀，四个 type 各自独立，互不干扰。
 	local TMP_FILE="$RUN_DIR/$LIST_FILE.${REPO_FILE}"
 
+	LIST_URL="https://cdn.jsdelivr.net/gh/$REPO_NAME@$REPO_BRANCH/$REPO_FILE"
+
 	if ! curl -sL --http1.1 --connect-timeout 20 --max-time 120 \
 			--speed-limit 6144 --speed-time 60 \
-			-o "$TMP_FILE" "https://cdn.jsdelivr.net/gh/$REPO_NAME@$REPO_BRANCH/$REPO_FILE" \
+			-o "$TMP_FILE" "$LIST_URL" \
 		|| [ ! -s "$TMP_FILE" ]; then
-		rm -f "$TMP_FILE"
-		log "[$(to_upper "$LIST_FILE")] Update failed."
+		log "[$(to_upper "$LIST_FILE")] 直连下载失败，改走代理 $PROXY_URL 重试。"
 
-		return 1
+		if ! curl -sL --http1.1 --connect-timeout 20 --max-time 120 \
+				--speed-limit 6144 --speed-time 60 -x "$PROXY_URL" \
+				-o "$TMP_FILE" "$LIST_URL" \
+			|| [ ! -s "$TMP_FILE" ]; then
+			rm -f "$TMP_FILE"
+			log "[$(to_upper "$LIST_FILE")] Update failed."
+
+			return 1
+		fi
 	fi
 
 	mv -f "$TMP_FILE" "$RESOURCES_DIR/$LIST_FILE.${REPO_FILE##*.}"
