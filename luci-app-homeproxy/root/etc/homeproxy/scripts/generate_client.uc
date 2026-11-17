@@ -194,37 +194,6 @@ if (routing_mode !== 'custom') {
 	if (direct_domain_list)
 		direct_domain_list = split(direct_domain_list, /[\r\n]/);
 
-	/* 内置直连域名（随包发布，用户自己的名单仍可追加）：
-	   国内大厂的 API 域名常年解析到境外段——字节 155.102.x、腾讯云香港 43.163.x、
-	   华为云新加坡 119.8.x。它们不在 geosite-cn 里，于是 DNS 交给境外解析器、
-	   拿回境外 IP、被兜底规则判成境外，白绕一趟代理（实测 0.75s vs 直连 0.11s）。
-	   写进这里等于同时改了两处：DNS 分流表改用国内解析器、路由分流表命中直连。 */
-	const builtin_direct_domains = [
-		'zijieapi.com',
-		'snssdk.com',
-		'cloud.huawei.com',
-		'platform.hicloud.com',
-		'dbankcloud.cn',
-		'map.qq.com',
-		'galileotelemetry.tencent.com'
-	];
-
-	if (type(direct_domain_list) !== 'array')
-		direct_domain_list = [];
-
-	for (let domain in builtin_direct_domains) {
-		let listed = false;
-
-		for (let item in direct_domain_list)
-			if (trim(sprintf('%s', item)) === domain) {
-				listed = true;
-				break;
-			}
-
-		if (!listed)
-			push(direct_domain_list, domain);
-	}
-
 	proxy_domain_list = trim(readfile(HP_DIR + '/resources/proxy_list.txt'));
 	if (proxy_domain_list)
 		proxy_domain_list = split(proxy_domain_list, /[\r\n]/);
