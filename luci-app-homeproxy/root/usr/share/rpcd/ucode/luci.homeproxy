@@ -2392,10 +2392,39 @@ const methods = {
 		call: function(req) {
 			const section = req.args?.section || '';
 
-			if (!match(section, /^[A-Za-z0-9_]+$/))
+			if (!match(section, /^[A-Za-z0-9_-]+$/))
 				return { result: false, error: 'illegal section' };
 
 			const uci = cursor();
+
+			/* 内置规则集（bypass_mainland_china / gfwlist 模式下由生成器直接
+			   push 进配置，没有对应的 uci ruleset 段）：以前这里直接返回
+			   「illegal section」/「no such section」，界面上点「立即更新」
+			   永远失败。内置集合的下载由内核在启动时按 remote 定义完成，
+			   所以这里的做法是：删掉本地副本 + 重启服务，让内核重新拉取。
+			   代价是一次服务重启，比什么都做不了要好。 */
+			{
+				let routing_mode_now = trim(uci.get('homeproxy', 'config', 'routing_mode') || DEFAULT_ROUTING_MODE),
+				    is_builtin = false;
+
+				for (let tag in builtinRuleSets(routing_mode_now))
+					if (tag === section)
+						is_builtin = true;
+
+				if (is_builtin) {
+					const name = replace(section, /[^A-Za-z0-9_.-]/g, '_'),
+					      path = `${RULESET_DIR}/${name}.srs`;
+
+					unlink(path);
+					unlink(`${path}.unavailable`);
+
+					/* 后台重启：不能让 rpcd 阻塞（同 ruleset_update 的注释）。 */
+					system('{ /etc/init.d/homeproxy restart; echo $? > ' + RUN_DIR + '/ruleset_update.rc; } </dev/null >/dev/null 2>&1 &');
+
+					return { result: true, started: true, builtin: true };
+				}
+			}
+
 			let stype = null;
 
 			uci.foreach('homeproxy', 'ruleset', (sec) => {
