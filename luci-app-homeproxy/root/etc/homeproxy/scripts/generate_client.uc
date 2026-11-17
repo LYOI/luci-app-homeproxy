@@ -1854,7 +1854,7 @@ if (!isEmpty(main_node)) {
 			type: 'remote',
 			tag: 'geoip-cn',
 			format: 'binary',
-			url: 'https://fastly.jsdelivr.net/gh/1715173329/IPCIDR-CHINA@rule-set/cn.srs',
+			url: 'https://fastly.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@sing/geo/geoip/cn.srs',
 			path: ruleset_default_path('geoip-cn', 'binary'),
 			http_client: dl_tag_for('main-out')
 		});
@@ -1862,7 +1862,7 @@ if (!isEmpty(main_node)) {
 			type: 'remote',
 			tag: 'geosite-cn',
 			format: 'binary',
-			url: 'https://fastly.jsdelivr.net/gh/1715173329/sing-geosite@rule-set-unstable/geosite-geolocation-cn.srs',
+			url: 'https://fastly.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@sing/geo/geosite/cn.srs',
 			path: ruleset_default_path('geosite-cn', 'binary'),
 			http_client: dl_tag_for('main-out')
 		});
@@ -1875,7 +1875,7 @@ if (!isEmpty(main_node)) {
 			type: 'remote',
 			tag: 'geosite-noncn',
 			format: 'binary',
-			url: 'https://fastly.jsdelivr.net/gh/1715173329/sing-geosite@rule-set-unstable/geosite-geolocation-!cn.srs',
+			url: 'https://fastly.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@sing/geo/geosite/geolocation-!cn.srs',
 			path: ruleset_default_path('geosite-noncn', 'binary'),
 			http_client: dl_tag_for('main-out')
 		});
