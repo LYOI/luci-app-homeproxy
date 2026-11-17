@@ -2415,11 +2415,49 @@ const methods = {
 					const name = replace(section, /[^A-Za-z0-9_.-]/g, '_'),
 					      path = `${RULESET_DIR}/${name}.srs`;
 
-					unlink(path);
-					unlink(`${path}.unavailable`);
+					/* 下载地址从「运行中的配置」取，不在 rpcd 里再抄一份 URL：
+					   生成器改了地址，这里自动跟着变。
+					   优先用正在跑的那份（remote 规则集带 url 字段）；启动失败
+					   时退回磁盘上的 sing-box-c.json。 */
+					let url = null;
 
-					/* 后台重启：不能让 rpcd 阻塞（同 ruleset_update 的注释）。 */
-					system('{ /etc/init.d/homeproxy restart; echo $? > ' + RUN_DIR + '/ruleset_update.rc; } </dev/null >/dev/null 2>&1 &');
+					for (let json_path in [ `${RUN_DIR}/sing-box-c.json` ]) {
+						try {
+							const raw = readfile(json_path);
+
+							if (!length(raw))
+								continue;
+
+							const cfg = json(raw);
+
+							for (let rs in cfg?.route?.rule_set ?? [])
+								if (rs?.tag === section && length(rs?.url))
+									url = rs.url;
+						} catch (e) {}
+					}
+
+					if (!url)
+						return { result: false, error: '内置规则集没有可用的下载地址' };
+
+					const mixed = trim(uci.get('homeproxy', 'infra', 'mixed_port') || '5330'),
+					      script = `${HP_DIR}/scripts/refresh_builtin_ruleset.sh`;
+
+					if (!access(script))
+						return { result: false, error: '刷新脚本缺失' };
+
+					const rc_file = `${RUN_DIR}/ruleset_update.rc`;
+
+					unlink(rc_file);
+
+					/* 先下载、成功后才覆盖并重启（脚本内部完成）；单次 30 秒上限，
+					   代理 → 直连 → 镜像依次退让。这里只负责脱管启动。 */
+					system('{ /bin/sh ' + shellquote(script) + ' '
+						+ shellquote(url) + ' '
+						+ shellquote(path) + ' '
+						+ shellquote(`http://127.0.0.1:${mixed}`) + ' '
+						+ shellquote(section) + ' '
+						+ shellquote(rc_file)
+						+ '; } </dev/null >/dev/null 2>&1 &');
 
 					return { result: true, started: true, builtin: true };
 				}
