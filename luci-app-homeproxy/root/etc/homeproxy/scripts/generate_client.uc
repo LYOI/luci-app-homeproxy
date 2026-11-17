@@ -201,7 +201,11 @@ if (routing_mode !== 'custom') {
 	   写进这里等于同时改了两处：DNS 分流表改用国内解析器、路由分流表命中直连。 */
 	const builtin_direct_domains = [
 		'zijieapi.com',
+		'snssdk.com',
 		'cloud.huawei.com',
+		'platform.hicloud.com',
+		'dbankcloud.cn',
+		'map.qq.com',
 		'galileotelemetry.tencent.com'
 	];
 
